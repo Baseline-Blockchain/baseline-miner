@@ -1,21 +1,26 @@
-import hashlib
-
 POW_LIMIT_BITS = 0x207FFFFF
 MAX_HASH = (1 << 256) - 1
 
-USING_NATIVE = False
-
 try:
+    from ._sha256d import backend as BACKEND
+    from ._sha256d import scan_hashes as _native_scan_hashes
     from ._sha256d import sha256d as _native_sha256d
+except Exception as exc:  # noqa: BLE001
+    raise RuntimeError(
+        "Native hashing backend is required but could not be loaded. "
+        "Reinstall with a working C compiler."
+    ) from exc
 
-    def sha256d(data: bytes) -> bytes:
-        return _native_sha256d(data)
+USING_NATIVE = True
+HAS_SCAN = True
 
-    USING_NATIVE = True
-except Exception:
 
-    def sha256d(data: bytes) -> bytes:
-        return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def sha256d(data: bytes) -> bytes:
+    return _native_sha256d(data)
+
+
+def scan_hashes(header_prefix: bytes, start_nonce: int, count: int, target: bytes):
+    return _native_scan_hashes(header_prefix, start_nonce, count, target)
 
 
 def compact_to_target(bits: int) -> int:

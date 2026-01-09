@@ -16,3 +16,4 @@ Homepage = "https://github.com/Baseline-Blockchain/baseline-miner"
 
 [project.scripts]
 baseline-miner = "baseline_miner.cli:main"
+baseline-miner-bench = "baseline_miner.bench:main"

@@ -17,6 +17,18 @@ class HashingTests(unittest.TestCase):
         self.assertEqual(target1, base_target)
         self.assertLess(target2, target1)
 
+    def test_scan_hashes_matches_reference(self) -> None:
+        self.assertTrue(hashing.HAS_SCAN)
+        header_prefix = b"\x00" * 76
+        target = b"\xff" * 32
+        results = hashing.scan_hashes(header_prefix, 0, 5, target)
+        self.assertEqual(len(results), 5)
+        for nonce, hash_bytes in results:
+            expected = hashlib.sha256(
+                hashlib.sha256(header_prefix + nonce.to_bytes(4, "little")).digest()
+            ).digest()
+            self.assertEqual(hash_bytes, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

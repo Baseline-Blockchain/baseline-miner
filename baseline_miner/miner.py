@@ -4,7 +4,14 @@ import queue
 import struct
 import time
 
-from .hashing import compact_to_target, difficulty_to_target_bytes, sha256d, target_to_bytes
+from .hashing import (
+    HAS_SCAN,
+    compact_to_target,
+    difficulty_to_target_bytes,
+    scan_hashes,
+    sha256d,
+    target_to_bytes,
+)
 from .job import MiningJob, Share
 
 NONCE_LIMIT = 0x100000000
@@ -45,6 +52,7 @@ def _worker_main(
     last_ntime_update = 0.0
     rebuild_header = False
     header: bytearray | None = None
+    header_prefix = b""
     current_ntime = 0
 
     while not stop_event.is_set():
@@ -68,6 +76,7 @@ def _worker_main(
                 nonce = 0
                 rebuild_header = True
                 header = None
+                header_prefix = b""
                 current_ntime = 0
             elif kind == "diff":
                 share_target = difficulty_to_target_bytes(float(payload))
@@ -85,35 +94,53 @@ def _worker_main(
             coinbase = current_job.coinb1 + extranonce1 + extranonce2_bytes + current_job.coinb2
             coinbase_hash = sha256d(coinbase)
             merkle_root = _merkle_root(coinbase_hash, merkle_branches)
-            header_base = version_le + prev_hash_le + merkle_root + ntime.to_bytes(4, "little") + bits_le
-            header = bytearray(header_base + b"\x00\x00\x00\x00")
+            header_prefix = version_le + prev_hash_le + merkle_root + ntime.to_bytes(4, "little") + bits_le
+            header = None
             current_ntime = ntime
             last_ntime_update = now
             rebuild_header = False
         else:
             ntime = current_ntime
 
-        if header is None:
+        if not header_prefix:
             time.sleep(0)
             continue
 
         remaining = NONCE_LIMIT - nonce
         span = CHUNK_SIZE if remaining > CHUNK_SIZE else remaining
-        for _ in range(span):
-            struct.pack_into("<I", header, 76, nonce)
-            hash_bytes = sha256d(header)
-            if hash_bytes <= share_target:
+        if HAS_SCAN:
+            matches = scan_hashes(header_prefix, nonce, span, share_target)
+            for match_nonce, hash_bytes in matches:
                 share_queue.put(
                     Share(
                         job_id=current_job.job_id,
                         extranonce2=extranonce2,
                         ntime=ntime,
-                        nonce=nonce,
+                        nonce=match_nonce,
                         is_block=hash_bytes <= block_target,
                         hash_hex=hash_bytes[::-1].hex(),
                     )
                 )
-            nonce += 1
+            nonce += span
+        else:
+            if header is None:
+                header = bytearray(header_prefix + b"\x00\x00\x00\x00")
+            for offset in range(span):
+                current_nonce = nonce + offset
+                struct.pack_into("<I", header, 76, current_nonce)
+                hash_bytes = sha256d(header)
+                if hash_bytes <= share_target:
+                    share_queue.put(
+                        Share(
+                            job_id=current_job.job_id,
+                            extranonce2=extranonce2,
+                            ntime=ntime,
+                            nonce=current_nonce,
+                            is_block=hash_bytes <= block_target,
+                            hash_hex=hash_bytes[::-1].hex(),
+                        )
+                    )
+            nonce += span
         hash_counter.value += span
 
         if nonce >= NONCE_LIMIT:

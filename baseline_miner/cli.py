@@ -143,7 +143,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("baseline_miner").info(
-        "Native hashing backend: %s", "enabled" if hashing.USING_NATIVE else "disabled"
+        "Native hashing backend: %s", getattr(hashing, "BACKEND", "unknown")
     )
 
     try:

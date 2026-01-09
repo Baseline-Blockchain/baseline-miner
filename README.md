@@ -4,13 +4,14 @@ Open source Stratum miner for Baseline pools, optimized for CPU throughput with 
 
 ## Features
 - Baseline Stratum client (subscribe/authorize/notify)
-- Multi-process SHA256d miner
+- Multi-process SHA256d miner (one worker per process)
+- Native SHA256d backend with runtime dispatch (SHA-NI on x86_64, ARMv8 crypto on Apple Silicon, portable fallback with self-test)
 - Vardiff `mining.set_difficulty` support
 - Clean job handling and share validation
 
 ## Requirements
 - Python 3.9+
-- A C compiler for the optional native hashing backend (recommended)
+- A C compiler (native hashing backend is required)
 
 ## Install
 ```
@@ -30,15 +31,15 @@ baseline-miner --host 127.0.0.1 --port 3333 --address <BLINE_ADDRESS> --worker r
 - `--stats-interval` seconds between hashrate reports
 - `--log-level` debug|info|warning|error
 
+## Benchmark
+```
+baseline-miner-bench --seconds 10 --threads 4
+```
+The default mode uses the native batch scan path (`--mode scan`). Use `--mode sha256d` to benchmark standalone hashing.
+
 ## Tests
 ```
 python -m unittest discover -s tests
-```
-
-## Native hashing backend
-The miner builds a C extension for SHA256d when a compiler is available. To disable native builds, set:
-```
-BASELINE_MINER_DISABLE_NATIVE=1
 ```
 
 ## Baseline-specific notes
