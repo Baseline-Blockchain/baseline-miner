@@ -115,17 +115,22 @@ def _worker_main(
         if HAS_SCAN:
             matches = scan_hashes(header_prefix, nonce, span, share_target)
             for match_nonce, hash_bytes in matches:
-                share_queue.put(
-                    Share(
-                        job_id=current_job_id or "",
-                        extranonce2=extranonce2,
-                        ntime=ntime,
-                        nonce=match_nonce,
-                        is_block=hash_bytes <= block_target,
-                        hash_hex=hash_bytes[::-1].hex(),
-                        job_seq=current_job_seq,
+                try:
+                    share_queue.put(
+                        Share(
+                            job_id=current_job_id or "",
+                            extranonce2=extranonce2,
+                            ntime=ntime,
+                            nonce=match_nonce,
+                            is_block=hash_bytes <= block_target,
+                            hash_hex=hash_bytes[::-1].hex(),
+                            job_seq=current_job_seq,
+                        ),
+                        timeout=0.1,
                     )
-                )
+                except queue.Full:
+                    if stop_event.is_set():
+                        break
             nonce += span
         else:
             if header is None:
@@ -135,6 +140,7 @@ def _worker_main(
                 struct.pack_into("<I", header, 76, current_nonce)
                 hash_bytes = sha256d(header)
                 if hash_bytes <= share_target:
+                    try:
                         share_queue.put(
                             Share(
                                 job_id=current_job_id or "",
@@ -144,8 +150,12 @@ def _worker_main(
                                 is_block=hash_bytes <= block_target,
                                 hash_hex=hash_bytes[::-1].hex(),
                                 job_seq=current_job_seq,
-                            )
+                            ),
+                            timeout=0.1,
                         )
+                    except queue.Full:
+                        if stop_event.is_set():
+                            break
             nonce += span
         hash_counter.value += span
 
@@ -198,6 +208,8 @@ class Miner:
             queue_item.put(("clear", None))
         for proc in self.processes:
             proc.join(timeout=2)
+            if proc.is_alive():
+                proc.terminate()
         self.processes.clear()
 
     def set_job(self, job: MiningJob) -> None:
