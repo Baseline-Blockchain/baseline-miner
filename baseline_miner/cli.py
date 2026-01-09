@@ -49,6 +49,7 @@ async def _stats_loop(miner: Miner, stats: dict[str, int], interval: float, stop
     log = logging.getLogger("baseline_miner")
     last_hashes = miner.snapshot_hashes()
     last_time = time.monotonic()
+    avg_rate: float | None = None
     while not stop_event.is_set():
         await asyncio.sleep(interval)
         total_hashes = miner.snapshot_hashes()
@@ -56,9 +57,15 @@ async def _stats_loop(miner: Miner, stats: dict[str, int], interval: float, stop
         delta_hashes = total_hashes - last_hashes
         elapsed = max(0.001, now - last_time)
         rate = delta_hashes / elapsed
+        if avg_rate is None:
+            avg_rate = rate
+        else:
+            # Smooth with exponential moving average for more stable display.
+            avg_rate = avg_rate * 0.7 + rate * 0.3
         log.info(
-            "Hashrate %.2f H/s | shares ok=%d rejected=%d blocks=%d",
+            "Hashrate inst=%.2f H/s avg=%.2f H/s | shares ok=%d rejected=%d blocks=%d",
             rate,
+            avg_rate,
             stats["accepted"],
             stats["rejected"],
             stats["blocks"],

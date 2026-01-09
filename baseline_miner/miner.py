@@ -18,6 +18,9 @@ NONCE_LIMIT = 0x100000000
 CHUNK_SIZE = 20000
 NTIME_UPDATE_INTERVAL = 1.0
 SLEEP_NO_JOB = 0.1
+# Cap per-chunk share emission to avoid Python overhead at very low difficulty.
+# This reduces reported shares when targets are extremely easy but keeps hashing hot.
+MAX_SHARES_PER_CHUNK = 64
 
 
 def _merkle_root(coinbase_hash: bytes, branches: list[bytes]) -> bytes:
@@ -114,7 +117,10 @@ def _worker_main(
         span = CHUNK_SIZE if remaining > CHUNK_SIZE else remaining
         if HAS_SCAN:
             matches = scan_hashes(header_prefix, nonce, span, share_target)
+            emitted = 0
             for match_nonce, hash_bytes in matches:
+                if emitted >= MAX_SHARES_PER_CHUNK:
+                    break
                 try:
                     share_queue.put(
                         Share(
@@ -128,6 +134,7 @@ def _worker_main(
                         ),
                         timeout=0.1,
                     )
+                    emitted += 1
                 except queue.Full:
                     if stop_event.is_set():
                         break
@@ -157,7 +164,8 @@ def _worker_main(
                         if stop_event.is_set():
                             break
             nonce += span
-        hash_counter.value += span
+        with hash_counter.get_lock():
+            hash_counter.value += span
 
         if nonce >= NONCE_LIMIT:
             extranonce2 = (extranonce2 + step) % max_extranonce2
@@ -183,7 +191,7 @@ class Miner:
             return
         for worker_id in range(self.threads):
             job_queue = self.ctx.Queue()
-            hash_counter = self.ctx.Value("Q", 0, lock=False)
+            hash_counter = self.ctx.Value("Q", 0, lock=True)
             proc = self.ctx.Process(
                 target=_worker_main,
                 args=(
@@ -211,10 +219,12 @@ class Miner:
             if proc.is_alive():
                 proc.terminate()
         self.processes.clear()
-
-    def set_job(self, job: MiningJob) -> None:
         for queue_item in self.job_queues:
-            queue_item.put(("job", job))
+            queue_item.close()
+            queue_item.join_thread()
+        self.job_queues.clear()
+        self.share_queue.close()
+        self.share_queue.join_thread()
 
     def clear_job(self) -> None:
         for queue_item in self.job_queues:
@@ -225,7 +235,11 @@ class Miner:
             queue_item.put(("diff", difficulty))
 
     def snapshot_hashes(self) -> int:
-        return sum(counter.value for counter in self.hash_counters)
+        total = 0
+        for counter in self.hash_counters:
+            with counter.get_lock():
+                total += counter.value
+        return total
 
     def set_job(self, job: MiningJob) -> None:
         if job.clean:
