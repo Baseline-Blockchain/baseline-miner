@@ -1,0 +1,181 @@
+import multiprocessing as mp
+import os
+import queue
+import struct
+import time
+
+from .hashing import compact_to_target, difficulty_to_target_bytes, sha256d, target_to_bytes
+from .job import MiningJob, Share
+
+NONCE_LIMIT = 0x100000000
+CHUNK_SIZE = 20000
+NTIME_UPDATE_INTERVAL = 1.0
+SLEEP_NO_JOB = 0.1
+
+
+def _merkle_root(coinbase_hash: bytes, branches: list[bytes]) -> bytes:
+    merkle = coinbase_hash
+    for sibling in branches:
+        merkle = sha256d(merkle + sibling)
+    return merkle
+
+
+def _worker_main(
+    worker_id: int,
+    worker_count: int,
+    job_queue: mp.Queue,
+    share_queue: mp.Queue,
+    stop_event: mp.Event,
+    hash_counter: mp.Value,
+    extranonce2_size: int,
+) -> None:
+    share_target = difficulty_to_target_bytes(1.0)
+    current_job: MiningJob | None = None
+    prev_hash_le = b""
+    version_le = b""
+    bits_le = b""
+    merkle_branches: list[bytes] = []
+    extranonce1 = b""
+    ntime_base = 0
+    block_target = target_to_bytes(1)
+    max_extranonce2 = 1 << (extranonce2_size * 8)
+    step = worker_count % max_extranonce2 or 1
+    extranonce2 = worker_id % max_extranonce2
+    nonce = 0
+    last_ntime_update = 0.0
+    rebuild_header = False
+    header: bytearray | None = None
+    current_ntime = 0
+
+    while not stop_event.is_set():
+        while True:
+            try:
+                kind, payload = job_queue.get_nowait()
+            except queue.Empty:
+                break
+            if kind == "job":
+                current_job = payload
+                if current_job is None:
+                    continue
+                prev_hash_le = current_job.prev_hash_le
+                version_le = current_job.version.to_bytes(4, "little")
+                bits_le = current_job.bits.to_bytes(4, "little")
+                merkle_branches = current_job.merkle_branches_le
+                extranonce1 = current_job.extranonce1
+                ntime_base = current_job.ntime
+                block_target = target_to_bytes(compact_to_target(current_job.bits))
+                extranonce2 = worker_id % max_extranonce2
+                nonce = 0
+                rebuild_header = True
+                header = None
+                current_ntime = 0
+            elif kind == "diff":
+                share_target = difficulty_to_target_bytes(float(payload))
+            elif kind == "clear":
+                current_job = None
+
+        if current_job is None:
+            time.sleep(SLEEP_NO_JOB)
+            continue
+
+        now = time.time()
+        if rebuild_header or now - last_ntime_update >= NTIME_UPDATE_INTERVAL:
+            ntime = max(ntime_base, int(now))
+            extranonce2_bytes = extranonce2.to_bytes(extranonce2_size, "big")
+            coinbase = current_job.coinb1 + extranonce1 + extranonce2_bytes + current_job.coinb2
+            coinbase_hash = sha256d(coinbase)
+            merkle_root = _merkle_root(coinbase_hash, merkle_branches)
+            header_base = version_le + prev_hash_le + merkle_root + ntime.to_bytes(4, "little") + bits_le
+            header = bytearray(header_base + b"\x00\x00\x00\x00")
+            current_ntime = ntime
+            last_ntime_update = now
+            rebuild_header = False
+        else:
+            ntime = current_ntime
+
+        if header is None:
+            time.sleep(0)
+            continue
+
+        remaining = NONCE_LIMIT - nonce
+        span = CHUNK_SIZE if remaining > CHUNK_SIZE else remaining
+        for _ in range(span):
+            struct.pack_into("<I", header, 76, nonce)
+            hash_bytes = sha256d(header)
+            if hash_bytes <= share_target:
+                share_queue.put(
+                    Share(
+                        job_id=current_job.job_id,
+                        extranonce2=extranonce2,
+                        ntime=ntime,
+                        nonce=nonce,
+                        is_block=hash_bytes <= block_target,
+                        hash_hex=hash_bytes[::-1].hex(),
+                    )
+                )
+            nonce += 1
+        hash_counter.value += span
+
+        if nonce >= NONCE_LIMIT:
+            extranonce2 = (extranonce2 + step) % max_extranonce2
+            nonce = 0
+            rebuild_header = True
+
+
+class Miner:
+    def __init__(self, threads: int | None = None, extranonce2_size: int = 4):
+        self.threads = threads or os.cpu_count() or 1
+        self.extranonce2_size = extranonce2_size
+        self.ctx = mp.get_context("spawn")
+        self.job_queues: list[mp.Queue] = []
+        self.share_queue: mp.Queue = self.ctx.Queue()
+        self.stop_event = self.ctx.Event()
+        self.processes: list[mp.Process] = []
+        self.hash_counters: list[mp.Value] = []
+
+    def start(self) -> None:
+        if self.processes:
+            return
+        for worker_id in range(self.threads):
+            job_queue = self.ctx.Queue()
+            hash_counter = self.ctx.Value("Q", 0, lock=False)
+            proc = self.ctx.Process(
+                target=_worker_main,
+                args=(
+                    worker_id,
+                    self.threads,
+                    job_queue,
+                    self.share_queue,
+                    self.stop_event,
+                    hash_counter,
+                    self.extranonce2_size,
+                ),
+                daemon=True,
+            )
+            proc.start()
+            self.job_queues.append(job_queue)
+            self.hash_counters.append(hash_counter)
+            self.processes.append(proc)
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        for queue_item in self.job_queues:
+            queue_item.put(("clear", None))
+        for proc in self.processes:
+            proc.join(timeout=2)
+        self.processes.clear()
+
+    def set_job(self, job: MiningJob) -> None:
+        for queue_item in self.job_queues:
+            queue_item.put(("job", job))
+
+    def clear_job(self) -> None:
+        for queue_item in self.job_queues:
+            queue_item.put(("clear", None))
+
+    def set_difficulty(self, difficulty: float) -> None:
+        for queue_item in self.job_queues:
+            queue_item.put(("diff", difficulty))
+
+    def snapshot_hashes(self) -> int:
+        return sum(counter.value for counter in self.hash_counters)

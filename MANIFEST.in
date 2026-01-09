@@ -1,0 +1,1 @@
+include baseline_miner/native/sha256d.c
