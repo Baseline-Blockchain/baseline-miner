@@ -28,6 +28,9 @@ async def _share_sender(
         share = await asyncio.to_thread(miner.share_queue.get)
         if stop_event.is_set() or not client.connected:
             break
+        if miner.current_job_id and share.job_seq != miner.job_seq:
+            # Drop stale share from previous job.
+            continue
         ok = await client.submit_share(share, worker_name, miner.extranonce2_size)
         if ok:
             stats["accepted"] += 1

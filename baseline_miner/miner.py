@@ -38,6 +38,8 @@ def _worker_main(
 ) -> None:
     share_target = difficulty_to_target_bytes(1.0)
     current_job: MiningJob | None = None
+    current_job_id: str | None = None
+    current_job_seq: int = 0
     prev_hash_le = b""
     version_le = b""
     bits_le = b""
@@ -62,9 +64,10 @@ def _worker_main(
             except queue.Empty:
                 break
             if kind == "job":
-                current_job = payload
+                current_job_seq, current_job = payload
                 if current_job is None:
                     continue
+                current_job_id = current_job.job_id
                 prev_hash_le = current_job.prev_hash_le
                 version_le = current_job.version.to_bytes(4, "little")
                 bits_le = current_job.bits.to_bytes(4, "little")
@@ -82,6 +85,7 @@ def _worker_main(
                 share_target = difficulty_to_target_bytes(float(payload))
             elif kind == "clear":
                 current_job = None
+                current_job_id = None
 
         if current_job is None:
             time.sleep(SLEEP_NO_JOB)
@@ -113,12 +117,13 @@ def _worker_main(
             for match_nonce, hash_bytes in matches:
                 share_queue.put(
                     Share(
-                        job_id=current_job.job_id,
+                        job_id=current_job_id or "",
                         extranonce2=extranonce2,
                         ntime=ntime,
                         nonce=match_nonce,
                         is_block=hash_bytes <= block_target,
                         hash_hex=hash_bytes[::-1].hex(),
+                        job_seq=current_job_seq,
                     )
                 )
             nonce += span
@@ -130,16 +135,17 @@ def _worker_main(
                 struct.pack_into("<I", header, 76, current_nonce)
                 hash_bytes = sha256d(header)
                 if hash_bytes <= share_target:
-                    share_queue.put(
-                        Share(
-                            job_id=current_job.job_id,
-                            extranonce2=extranonce2,
-                            ntime=ntime,
-                            nonce=current_nonce,
-                            is_block=hash_bytes <= block_target,
-                            hash_hex=hash_bytes[::-1].hex(),
+                        share_queue.put(
+                            Share(
+                                job_id=current_job_id or "",
+                                extranonce2=extranonce2,
+                                ntime=ntime,
+                                nonce=current_nonce,
+                                is_block=hash_bytes <= block_target,
+                                hash_hex=hash_bytes[::-1].hex(),
+                                job_seq=current_job_seq,
+                            )
                         )
-                    )
             nonce += span
         hash_counter.value += span
 
@@ -159,6 +165,8 @@ class Miner:
         self.stop_event = self.ctx.Event()
         self.processes: list[mp.Process] = []
         self.hash_counters: list[mp.Value] = []
+        self.current_job_id: str | None = None
+        self.job_seq: int = 0
 
     def start(self) -> None:
         if self.processes:
@@ -206,3 +214,17 @@ class Miner:
 
     def snapshot_hashes(self) -> int:
         return sum(counter.value for counter in self.hash_counters)
+
+    def set_job(self, job: MiningJob) -> None:
+        if job.clean:
+            self.clear_job()
+            # Drop any shares computed for stale work.
+            while True:
+                try:
+                    self.share_queue.get_nowait()
+                except queue.Empty:
+                    break
+        self.job_seq += 1
+        self.current_job_id = job.job_id
+        for queue_item in self.job_queues:
+            queue_item.put(("job", (self.job_seq, job)))

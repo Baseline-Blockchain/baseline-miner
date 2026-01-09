@@ -23,3 +23,4 @@ class Share:
     nonce: int
     is_block: bool
     hash_hex: str
+    job_seq: int = 0

@@ -76,7 +76,14 @@ class StratumClient:
             )
             return bool(result)
         except Exception as exc:
-            self.log.debug("Share submission failed: %s", exc)
+            self.log.warning(
+                "Share rejected for job %s (extranonce2=%s ntime=%s nonce=%s): %s",
+                share.job_id,
+                extranonce2_hex,
+                ntime_hex,
+                nonce_hex,
+                exc,
+            )
             return False
 
     async def request(self, method: str, params: list[Any]) -> Any:
