@@ -31,6 +31,17 @@ def _merkle_root(coinbase_hash: bytes, branches: list[bytes]) -> bytes:
     return merkle
 
 
+def _build_header_prefix(job: MiningJob, *, extranonce2: int, extranonce2_size: int, ntime: int) -> bytes:
+    version_le = job.version.to_bytes(4, "little")
+    bits_le = job.bits.to_bytes(4, "little")
+    extranonce2_bytes = extranonce2.to_bytes(extranonce2_size, "big")
+    coinbase = job.coinb1 + job.extranonce1 + extranonce2_bytes + job.coinb2
+    coinbase_hash = sha256d(coinbase)
+    merkle_root = _merkle_root(coinbase_hash, job.merkle_branches_le)
+    # Block headers serialize the merkle root in little-endian.
+    return version_le + job.prev_hash_le + merkle_root[::-1] + ntime.to_bytes(4, "little") + bits_le
+
+
 def _worker_main(
     worker_id: int,
     worker_count: int,
@@ -45,11 +56,6 @@ def _worker_main(
     current_job: MiningJob | None = None
     current_job_id: str | None = None
     current_job_seq: int = 0
-    prev_hash_le = b""
-    version_le = b""
-    bits_le = b""
-    merkle_branches: list[bytes] = []
-    extranonce1 = b""
     ntime_base = 0
     block_target = target_to_bytes(1)
     max_extranonce2 = 1 << (extranonce2_size * 8)
@@ -73,11 +79,6 @@ def _worker_main(
                 if current_job is None:
                     continue
                 current_job_id = current_job.job_id
-                prev_hash_le = current_job.prev_hash_le
-                version_le = current_job.version.to_bytes(4, "little")
-                bits_le = current_job.bits.to_bytes(4, "little")
-                merkle_branches = current_job.merkle_branches_le
-                extranonce1 = current_job.extranonce1
                 ntime_base = current_job.ntime
                 block_target = target_to_bytes(compact_to_target(current_job.bits))
                 extranonce2 = worker_id % max_extranonce2
@@ -99,11 +100,12 @@ def _worker_main(
         now = time.time()
         if rebuild_header or now - last_ntime_update >= NTIME_UPDATE_INTERVAL:
             ntime = max(ntime_base, int(now))
-            extranonce2_bytes = extranonce2.to_bytes(extranonce2_size, "big")
-            coinbase = current_job.coinb1 + extranonce1 + extranonce2_bytes + current_job.coinb2
-            coinbase_hash = sha256d(coinbase)
-            merkle_root = _merkle_root(coinbase_hash, merkle_branches)
-            header_prefix = version_le + prev_hash_le + merkle_root + ntime.to_bytes(4, "little") + bits_le
+            header_prefix = _build_header_prefix(
+                current_job,
+                extranonce2=extranonce2,
+                extranonce2_size=extranonce2_size,
+                ntime=ntime,
+            )
             header = None
             current_ntime = ntime
             last_ntime_update = now

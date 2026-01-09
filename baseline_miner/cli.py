@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import contextlib
+from collections import deque
 import logging
 import os
 import queue
@@ -25,6 +26,11 @@ async def _share_sender(
     stats: dict[str, int],
     stop_event: asyncio.Event,
 ) -> None:
+    recent_keys: set[tuple[int, int, int]] = set()
+    recent_order: deque[tuple[int, int, int]] = deque()
+    recent_job_seq: int | None = None
+    max_recent = 50_000
+
     while client.connected and not stop_event.is_set():
         try:
             share = await asyncio.to_thread(miner.share_queue.get, True, 0.5)
@@ -35,6 +41,18 @@ async def _share_sender(
         if miner.current_job_id and share.job_seq != miner.job_seq:
             # Drop stale share from previous job.
             continue
+        if recent_job_seq != share.job_seq:
+            recent_job_seq = share.job_seq
+            recent_keys.clear()
+            recent_order.clear()
+        key = (share.extranonce2, share.ntime, share.nonce)
+        if key in recent_keys:
+            continue
+        recent_keys.add(key)
+        recent_order.append(key)
+        if len(recent_order) > max_recent:
+            old = recent_order.popleft()
+            recent_keys.discard(old)
         ok = await client.submit_share(share, worker_name, miner.extranonce2_size)
         if ok:
             stats["accepted"] += 1

@@ -9,6 +9,14 @@ from .job import MiningJob, Share
 MAX_MESSAGE_BYTES = 4096
 
 
+class StratumRPCError(RuntimeError):
+    def __init__(self, code: int, message: str, data: object = None):
+        super().__init__(f"[{code}, {message!r}]")
+        self.code = int(code)
+        self.message = str(message)
+        self.data = data
+
+
 class StratumClient:
     def __init__(self, host: str, port: int, *, user_agent: str = "baseline-miner/0.1"):
         self.host = host
@@ -75,6 +83,27 @@ class StratumClient:
                 [worker_name, share.job_id, extranonce2_hex, ntime_hex, nonce_hex],
             )
             return bool(result)
+        except StratumRPCError as exc:
+            # These are expected during job switches or when resubmitting a share.
+            if exc.code in {29, 32}:
+                self.log.debug(
+                    "Share rejected for job %s (extranonce2=%s ntime=%s nonce=%s): %s",
+                    share.job_id,
+                    extranonce2_hex,
+                    ntime_hex,
+                    nonce_hex,
+                    exc,
+                )
+                return False
+            self.log.warning(
+                "Share rejected for job %s (extranonce2=%s ntime=%s nonce=%s): %s",
+                share.job_id,
+                extranonce2_hex,
+                ntime_hex,
+                nonce_hex,
+                exc,
+            )
+            return False
         except Exception as exc:
             self.log.warning(
                 "Share rejected for job %s (extranonce2=%s ntime=%s nonce=%s): %s",
@@ -126,7 +155,13 @@ class StratumClient:
                     future = self._pending.pop(msg_id)
                     error = message.get("error")
                     if error:
-                        future.set_exception(RuntimeError(str(error)))
+                        if isinstance(error, (list, tuple)) and len(error) >= 2:
+                            code = error[0]
+                            message_text = error[1]
+                        else:
+                            code = -1
+                            message_text = error
+                        future.set_exception(StratumRPCError(int(code), str(message_text), error))
                     else:
                         future.set_result(message.get("result"))
                     continue
