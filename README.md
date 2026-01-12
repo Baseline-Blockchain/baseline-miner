@@ -44,7 +44,7 @@ Note: CPU-specific builds may crash with `Illegal instruction` if you copy the w
 
 ### CPU Mining
 ```
-baseline-miner --host 127.0.0.1 --port 3333 --address <BLINE_ADDRESS> --worker rig1
+baseline-miner --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1
 ```
 
 ### GPU Mining
