@@ -17,6 +17,8 @@ Open source Stratum miner for Baseline Cash pools, optimized for CPU and GPU thr
 
 ## Install
 ```
+git clone https://github.com/Baseline-Blockchain/baseline-miner
+cd baseline-miner
 python -m venv .venv
 . .venv/bin/activate
 pip install -e .
@@ -52,7 +54,7 @@ baseline-miner --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> -
 # Mine with default GPU (platform 0, device 0)
 baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1
 
-# Mine with default GPU (platform 0, device 0)
+# Mine with all GPUs 
 baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1 --gpu-all
 
 # List available GPU devices
