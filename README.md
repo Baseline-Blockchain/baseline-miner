@@ -52,6 +52,9 @@ baseline-miner --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> -
 # Mine with default GPU (platform 0, device 0)
 baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1
 
+# Mine with default GPU (platform 0, device 0)
+baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1 --gpu-all
+
 # List available GPU devices
 baseline-miner list-devices
 
