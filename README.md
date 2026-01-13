@@ -1,9 +1,9 @@
-# Baseline Miner
+# Baseline Cash Miner
 
-Open source Stratum miner for Baseline pools, optimized for CPU and GPU throughput.
+Open source Stratum miner for Baseline Cash pools, optimized for CPU and GPU throughput.
 
 ## Features
-- Baseline Stratum client (subscribe/authorize/notify)
+- Baseline Cash Stratum client (subscribe/authorize/notify)
 - Multi-process SHA256d CPU miner (one worker per process)
 - **GPU mining support via OpenCL** (AMD, NVIDIA, Intel, Apple Silicon)
 - C SHA256d backend (portable by default; optimized scan path)
