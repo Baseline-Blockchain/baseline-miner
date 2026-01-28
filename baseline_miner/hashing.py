@@ -19,6 +19,8 @@ except Exception as exc:  # noqa: BLE001
 USING_NATIVE = True
 HAS_SCAN_D = True
 HAS_SCAN_T = True
+# Backward-compat alias retained for callers expecting a single backend name.
+BACKEND = "native"
 
 
 def sha256d(data: bytes) -> bytes:
