@@ -1,2 +1,4 @@
 include baseline_miner/native/sha256d.c
+include baseline_miner/native/sha256t.c
 include baseline_miner/opencl/sha256d.cl
+include baseline_miner/opencl/sha256t.cl

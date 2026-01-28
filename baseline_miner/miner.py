@@ -6,11 +6,13 @@ import struct
 import time
 
 from .hashing import (
-    HAS_SCAN,
+    HAS_SCAN_D,
     compact_to_target,
     difficulty_to_target_bytes,
     scan_hashes,
+    scan_hashes_sha256t,
     sha256d,
+    sha256t,
     target_to_bytes,
 )
 from .job import MiningJob, Share
@@ -56,6 +58,7 @@ def _worker_main(
     current_job: MiningJob | None = None
     current_job_id: str | None = None
     current_job_seq: int = 0
+    current_pow_sha256t = False
     ntime_base = 0
     block_target = target_to_bytes(1)
     max_extranonce2 = 1 << (extranonce2_size * 8)
@@ -79,6 +82,7 @@ def _worker_main(
                 if current_job is None:
                     continue
                 current_job_id = current_job.job_id
+                current_pow_sha256t = current_job.pow_sha256t
                 ntime_base = current_job.ntime
                 block_target = target_to_bytes(compact_to_target(current_job.bits))
                 extranonce2 = worker_id % max_extranonce2
@@ -119,8 +123,14 @@ def _worker_main(
 
         remaining = NONCE_LIMIT - nonce
         span = CHUNK_SIZE if remaining > CHUNK_SIZE else remaining
-        if HAS_SCAN:
-            matches = scan_hashes(header_prefix, nonce, span, share_target)
+        use_scan = (HAS_SCAN_D and not current_pow_sha256t) or (current_pow_sha256t and scan_hashes_sha256t)
+        hash_func = sha256t if current_pow_sha256t else sha256d
+
+        if use_scan:
+            if current_pow_sha256t:
+                matches = scan_hashes_sha256t(header_prefix, nonce, span, share_target)
+            else:
+                matches = scan_hashes(header_prefix, nonce, span, share_target)
             emitted = 0
             for match_nonce, hash_bytes in matches:
                 if stop_event.is_set() or emitted >= MAX_SHARES_PER_CHUNK:
@@ -147,7 +157,7 @@ def _worker_main(
             for offset in range(span):
                 current_nonce = nonce + offset
                 struct.pack_into("<I", header, 76, current_nonce)
-                hash_bytes = sha256d(header)
+                hash_bytes = hash_func(header)
                 if hash_bytes <= share_target:
                     share = Share(
                         job_id=current_job_id or "",

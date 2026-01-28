@@ -25,7 +25,12 @@ def _ext_modules() -> list[Extension]:
             "baseline_miner._sha256d",
             sources=["baseline_miner/native/sha256d.c"],
             extra_compile_args=extra_args,
-        )
+        ),
+        Extension(
+            "baseline_miner._sha256t",
+            sources=["baseline_miner/native/sha256t.c"],
+            extra_compile_args=extra_args,
+        ),
     ]
 
 

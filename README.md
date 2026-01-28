@@ -4,9 +4,9 @@ Open source Stratum miner for Baseline Cash pools, optimized for CPU and GPU thr
 
 ## Features
 - Baseline Cash Stratum client (subscribe/authorize/notify)
-- Multi-process SHA256d CPU miner (one worker per process)
+- Multi-process SHA256d and SHA256t CPU miner (one worker per process)
 - **GPU mining support via OpenCL** (AMD, NVIDIA, Intel, Apple Silicon)
-- C SHA256d backend (portable by default; optimized scan path)
+- C SHA256d and SHA256t backend (portable by default; optimized scan path)
 - Vardiff `mining.set_difficulty` support
 - Clean job handling and share validation
 
@@ -57,6 +57,13 @@ baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDR
 # Mine with all GPUs 
 baseline-miner --gpu --host pool.baseline.cash --port 3333 --address <BLINE_ADDRESS> --worker rig1 --gpu-all
 
+SHA256t activation: the miner auto-switches to triple-SHA256 when the pool’s `mining.notify` sets the `pow_sha256t` flag (Baseline node sends this after the network activation height). No CLI flag needed; GPU/CPU paths both follow the job’s algo.
+
+Bench examples:
+- CPU scan SHA256d: `baseline-miner-bench --mode scan-d`
+- CPU scan SHA256t: `baseline-miner-bench --mode scan-t`
+- GPU SHA256t: `baseline-miner-bench --gpu --mode sha256t`
+
 # List available GPU devices
 baseline-miner list-devices
 
@@ -92,26 +99,14 @@ baseline-miner-bench --gpu --seconds 10
 baseline-miner-bench --gpu --gpu-platform 0 --gpu-device 0 --seconds 10
 ```
 
-The default mode uses the native batch scan path (`--mode scan`). Use `--mode sha256d` to benchmark standalone hashing.
+Hashing algorithms:
+- Stratum jobs carry `pow_sha256t`; the miner auto-switches between SHA256d and SHA256t.
+- Bench defaults: `--mode scan-d` (SHA256d scan). Use `--mode scan-t` (SHA256t scan), `--mode sha256d`, or `--mode sha256t` to benchmark specific paths.
 
 ## Tests
 ```
 python -m unittest discover -s tests
 ```
-
-## GPU Notes
-The OpenCL kernel exactly replicates the CPU SHA256d algorithm, ensuring:
-- Identical hash output for the same inputs
-- Correct endianness handling (critical for Baseline compatibility)
-- Proper midstate optimization for mining efficiency
-
-The GPU implementation is compatible with AMD, NVIDIA, and Intel GPUs that support OpenCL 1.2+.
-
-## Baseline-specific notes
-- Proof-of-work is SHA256d like Bitcoin, but the block interval target is 20 seconds.
-- The pow limit bits default is `0x207fffff` (used for share target calculations).
-- Coinbase payouts include a foundation output; the pool handles this in templates.
-- Address version `0x35` is the Baseline prefix; pass a Baseline address for payouts.
 
 ## License
 MIT

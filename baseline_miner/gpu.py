@@ -70,14 +70,15 @@ def list_devices() -> list[GPUDevice]:
     return devices
 
 
-def _load_kernel_source() -> str:
-    """Load the OpenCL kernel source code."""
+def _load_kernel_source(mode: str = "sha256d") -> str:
+    """Load the OpenCL kernel source code for the given mode."""
+    filename = "sha256t.cl" if mode == "sha256t" else "sha256d.cl"
     try:
         files = importlib.resources.files("baseline_miner.opencl")
-        return (files / "sha256d.cl").read_text()
+        return (files / filename).read_text()
     except Exception:
         import os
-        kernel_path = os.path.join(os.path.dirname(__file__), "opencl", "sha256d.cl")
+        kernel_path = os.path.join(os.path.dirname(__file__), "opencl", filename)
         with open(kernel_path) as f:
             return f.read()
 
@@ -110,6 +111,7 @@ class GPUHasher:
         device_idx: int = 0,
         global_size: Optional[int] = None,
         local_size: Optional[int] = None,
+        mode: str = "sha256d",
     ):
         """Initialize the GPU hasher.
         
@@ -118,14 +120,19 @@ class GPUHasher:
             device_idx: Device index within the platform
             global_size: Number of work items per batch (default: 1M)
             local_size: Work group size (default: 256)
+            mode: 'sha256d' (default) or 'sha256t'
         """
         if not HAS_OPENCL:
             raise RuntimeError("PyOpenCL is not installed. Install with: pip install pyopencl")
         
+        if mode not in {"sha256d", "sha256t"}:
+            raise ValueError("mode must be 'sha256d' or 'sha256t'")
+
         self.platform_idx = platform_idx
         self.device_idx = device_idx
         self.global_size = global_size or self.DEFAULT_GLOBAL_SIZE
         self.local_size = local_size or self.DEFAULT_LOCAL_SIZE
+        self.mode = mode
         
         # Ensure global_size is a multiple of local_size
         if self.global_size % self.local_size != 0:
@@ -176,7 +183,7 @@ class GPUHasher:
         self._queue = cl.CommandQueue(self._ctx)
         
         # Compile kernel (suppress pyopencl cache warnings)
-        kernel_source = _load_kernel_source()
+        kernel_source = _load_kernel_source(self.mode)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self._program = cl.Program(self._ctx, kernel_source).build()
@@ -468,6 +475,7 @@ def scan_hashes_gpu(
     hasher: Optional[GPUHasher] = None,
     platform_idx: int = 0,
     device_idx: int = 0,
+    mode: str = "sha256d",
 ) -> list[tuple[int, bytes]]:
     """GPU version of scan_hashes matching the CPU interface.
     
@@ -479,12 +487,13 @@ def scan_hashes_gpu(
         hasher: Optional pre-initialized GPUHasher instance
         platform_idx: OpenCL platform index (if hasher not provided)
         device_idx: Device index (if hasher not provided)
+        mode: 'sha256d' or 'sha256t'
     
     Returns:
         List of (nonce, hash_bytes) tuples for matching nonces
     """
     if hasher is None:
-        hasher = GPUHasher(platform_idx=platform_idx, device_idx=device_idx)
+        hasher = GPUHasher(platform_idx=platform_idx, device_idx=device_idx, mode=mode)
         hasher.initialize()
     
     hasher.set_header_prefix(header_prefix)

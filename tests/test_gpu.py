@@ -17,13 +17,25 @@ except ImportError:
     scan_hashes_gpu = None
     list_devices = lambda: []
 
-from baseline_miner.hashing import scan_hashes as cpu_scan_hashes, sha256d
+from baseline_miner.hashing import (
+    scan_hashes as cpu_scan_hashes,
+    scan_hashes_sha256t as cpu_scan_hashes_t,
+    sha256d,
+    sha256t,
+)
 
 
 def _cpu_sha256d_header(header_prefix: bytes, nonce: int) -> bytes:
     """Compute SHA256d of a header using CPU."""
     header = header_prefix + nonce.to_bytes(4, "little")
     return hashlib.sha256(hashlib.sha256(header).digest()).digest()
+
+
+def _cpu_sha256t_header(header_prefix: bytes, nonce: int) -> bytes:
+    header = header_prefix + nonce.to_bytes(4, "little")
+    h1 = hashlib.sha256(header).digest()
+    h2 = hashlib.sha256(h1).digest()
+    return hashlib.sha256(h2).digest()
 
 
 @unittest.skipUnless(HAS_OPENCL, "OpenCL not available")
@@ -109,6 +121,29 @@ class GPUHashingTests(unittest.TestCase):
                 cpu_dict[nonce], gpu_dict[nonce],
                 f"Hash mismatch at nonce {nonce}"
             )
+
+    def test_scan_matches_cpu_sha256t(self) -> None:
+        """GPU SHA256t mode matches CPU triple-SHA256 for easy target."""
+        header_prefix = b"\x56" * 76
+        target = b"\xff" * 32
+
+        # CPU reference
+        cpu_results = cpu_scan_hashes_t(header_prefix, 0, 50, target)
+
+        # GPU in SHA256t mode
+        hasher = GPUHasher(platform_idx=0, device_idx=0, global_size=1024, mode="sha256t")
+        hasher.initialize()
+        self.hasher = hasher  # ensure tearDown releases
+        hasher.set_header_prefix(header_prefix)
+        hasher.set_target(target)
+        gpu_results = hasher.scan_nonces(0, 50)
+
+        self.assertEqual(len(cpu_results), len(gpu_results))
+        cpu_dict = {n: h for n, h in cpu_results}
+        gpu_dict = {n: h for n, h in gpu_results}
+        for nonce in cpu_dict:
+            self.assertIn(nonce, gpu_dict, f"GPU missing nonce {nonce}")
+            self.assertEqual(cpu_dict[nonce], gpu_dict[nonce], f"Hash mismatch at nonce {nonce}")
 
     def test_target_filtering(self) -> None:
         """Test that GPU correctly filters by target."""

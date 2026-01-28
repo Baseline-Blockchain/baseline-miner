@@ -14,6 +14,7 @@ from .hashing import (
     compact_to_target,
     difficulty_to_target_bytes,
     sha256d,
+    sha256t,
     target_to_bytes,
 )
 from .job import MiningJob, Share
@@ -66,6 +67,7 @@ def _gpu_worker_main(
     current_job: Optional[MiningJob] = None
     current_job_id: Optional[str] = None
     current_job_seq: int = 0
+    current_pow_sha256t = False
     ntime_base = 0
     block_target = target_to_bytes(1)
     max_extranonce2 = 1 << (extranonce2_size * 8)
@@ -90,6 +92,7 @@ def _gpu_worker_main(
                 if current_job is None:
                     continue
                 current_job_id = current_job.job_id
+                current_pow_sha256t = current_job.pow_sha256t
                 ntime_base = current_job.ntime
                 block_target = target_to_bytes(compact_to_target(current_job.bits))
                 extranonce2 = worker_id % max_extranonce2
@@ -138,12 +141,22 @@ def _gpu_worker_main(
         remaining = NONCE_LIMIT - nonce
         span = min(batch_size, remaining)
         
-        try:
-            matches = hasher.scan_nonces(nonce, span)
-        except Exception:
-            time.sleep(SLEEP_NO_JOB)
-            continue
-            
+        if current_pow_sha256t:
+            # GPU path does not support SHA256t; fall back to CPU hashing for correctness.
+            matches = []
+            for offset in range(span):
+                current_nonce = nonce + offset
+                header = header_prefix + current_nonce.to_bytes(4, "little")
+                hash_bytes = sha256t(header)
+                if hash_bytes <= share_target:
+                    matches.append((current_nonce, hash_bytes))
+        else:
+            try:
+                matches = hasher.scan_nonces(nonce, span)
+            except Exception:
+                time.sleep(SLEEP_NO_JOB)
+                continue
+
         emitted = 0
         for match_nonce, hash_bytes in matches:
             if stop_event.is_set() or emitted >= MAX_SHARES_PER_BATCH:

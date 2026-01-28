@@ -4,7 +4,7 @@ import os
 import threading
 import time
 
-from .hashing import BACKEND, scan_hashes, sha256d
+from .hashing import BACKEND_D, BACKEND_T, scan_hashes, scan_hashes_sha256t, sha256d, sha256t
 
 try:
     from .gpu import HAS_OPENCL, GPUHasher, list_devices as list_gpu_devices
@@ -24,16 +24,23 @@ def _worker(stop: mp.Event, counter: mp.Value, data: bytes, mode: str) -> None:
     nonce = 0
     header_prefix = b""
     target = b""
-    if mode == "scan":
+    if mode in {"scan-d", "scan-t"}:
         header_prefix = os.urandom(76)
         target = b"\x00" * 32
     while not stop.is_set():
-        if mode == "scan":
+        if mode == "scan-d":
             scan_hashes(header_prefix, nonce, BATCH_SIZE, target)
             nonce = (nonce + BATCH_SIZE) & 0xFFFFFFFF
             local += BATCH_SIZE
+        elif mode == "scan-t":
+            scan_hashes_sha256t(header_prefix, nonce, BATCH_SIZE, target)
+            nonce = (nonce + BATCH_SIZE) & 0xFFFFFFFF
+            local += BATCH_SIZE
         else:
-            sha256d(data)
+            if mode == "sha256t":
+                sha256t(data)
+            else:
+                sha256d(data)
             local += 1
         if local >= BATCH_SIZE:
             with counter.get_lock():
@@ -51,11 +58,13 @@ def _gpu_worker(
     platform_idx: int,
     device_idx: int,
     batch_size: int,
+    mode: str,
 ) -> None:
     """GPU benchmark worker."""
     hasher = GPUHasher(
         platform_idx=platform_idx,
         device_idx=device_idx,
+        mode=mode,
     )
     hasher.initialize()
     
@@ -119,6 +128,7 @@ def _run_gpu_benchmark(args: argparse.Namespace) -> None:
     print(f"Platform: {selected.platform_name}")
     
     batch_size = args.gpu_batch_size or GPU_BATCH_SIZE
+    mode = args.mode
     
     stop_event = threading.Event()
     counter = [0]
@@ -126,7 +136,7 @@ def _run_gpu_benchmark(args: argparse.Namespace) -> None:
     
     thread = threading.Thread(
         target=_gpu_worker,
-        args=(stop_event, counter, counter_lock, platform_idx, device_idx, batch_size),
+        args=(stop_event, counter, counter_lock, platform_idx, device_idx, batch_size, mode),
         daemon=True,
     )
     thread.start()
@@ -141,7 +151,7 @@ def _run_gpu_benchmark(args: argparse.Namespace) -> None:
         total = counter[0]
     rate = total / elapsed
     
-    print(f"Backend: OpenCL GPU")
+    print(f"Backend: OpenCL GPU ({mode})")
     print(f"Batch size: {batch_size}")
     print(f"Total hashes: {total}")
     print(f"Elapsed: {elapsed:.2f}s")
@@ -152,7 +162,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Baseline miner hashing benchmark")
     parser.add_argument("--seconds", type=float, default=DEFAULT_SECONDS)
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 1)
-    parser.add_argument("--mode", choices=["scan", "sha256d"], default="scan")
+    parser.add_argument("--mode", choices=["scan-d", "scan-t", "sha256d", "sha256t"], default="scan-d")
     parser.add_argument("--data-size", type=int, default=DEFAULT_DATA_SIZE)
     
     # GPU options

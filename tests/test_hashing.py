@@ -9,6 +9,8 @@ class HashingTests(unittest.TestCase):
         data = b"baseline"
         expected = hashlib.sha256(hashlib.sha256(data).digest()).digest()
         self.assertEqual(hashing.sha256d(data), expected)
+        expected_t = hashlib.sha256(hashlib.sha256(hashlib.sha256(data).digest()).digest()).digest()
+        self.assertEqual(hashing.sha256t(data), expected_t)
 
     def test_difficulty_targets(self) -> None:
         base_target = hashing.compact_to_target(hashing.POW_LIMIT_BITS)
@@ -18,7 +20,7 @@ class HashingTests(unittest.TestCase):
         self.assertLess(target2, target1)
 
     def test_scan_hashes_matches_reference(self) -> None:
-        self.assertTrue(hashing.HAS_SCAN)
+        self.assertTrue(hashing.HAS_SCAN_D)
         header_prefix = b"\x00" * 76
         target = b"\xff" * 32
         results = hashing.scan_hashes(header_prefix, 0, 5, target)

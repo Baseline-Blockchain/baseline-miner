@@ -13,6 +13,7 @@ class MiningJob:
     ntime: int
     extranonce1: bytes
     clean: bool
+    pow_sha256t: bool = False
 
 
 @dataclass

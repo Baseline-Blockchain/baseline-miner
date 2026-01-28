@@ -206,6 +206,7 @@ class StratumClient:
         bits = int(str(params[6]), 16)
         ntime = int(str(params[7]), 16)
         clean = bool(params[8])
+        pow_sha256t = bool(params[9]) if len(params) > 9 else False
         prev_hash_le = bytes.fromhex(prev_hash)[::-1]
         return MiningJob(
             job_id=job_id,
@@ -218,4 +219,5 @@ class StratumClient:
             ntime=ntime,
             extranonce1=self.extranonce1,
             clean=clean,
+            pow_sha256t=pow_sha256t,
         )
